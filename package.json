@@ -1,0 +1,14 @@
+{
+  "name": "pandora-geekolytics",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pandora indexer analytics dashboard with automated static deploy to GitHub Pages",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "analytics:mega": "node analytics/dune/mega/server.cjs",
+    "analytics:mega:export-static": "node analytics/dune/mega/export-static.cjs"
+  }
+}
