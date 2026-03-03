@@ -642,18 +642,6 @@ async function buildAnalyticsPayload(registry) {
     totalUsdc,
   }));
 
-  const unresolvedPastDeadline = polls
-    .filter((p) => toNum(p.status) === 0 && toNum(p.deadlineEpoch) > 0 && toNum(p.deadlineEpoch) < nowSec)
-    .slice(0, 50)
-    .map((p) => ({
-      pollId: p.id,
-      creator: p.creator,
-      question: p.question,
-      deadline: epochToIso(p.deadlineEpoch),
-      overdueHours: Math.max(0, (nowSec - toNum(p.deadlineEpoch)) / 3600),
-    }))
-    .sort((a, b) => b.overdueHours - a.overdueHours);
-
   const nearCloseMarkets = activeMarkets
     .map((m) => ({
       marketAddress: m.id,
@@ -1818,7 +1806,6 @@ async function buildAnalyticsPayload(registry) {
       topTraders,
       disputesByDay: disputesByDay.map((d) => ({ day: d.day, count: d.value })),
       redemptionByMarketType,
-      unresolvedPastDeadline: unresolvedPastDeadline.slice(0, 20),
     },
   };
 }

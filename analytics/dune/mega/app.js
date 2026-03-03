@@ -702,17 +702,6 @@ function buildAuxPanels(aux) {
       valueFormat: 'currency',
       key: 'aux_redemption_market_type',
     },
-    {
-      title: 'Unresolved Past Deadline Polls',
-      type: 'table',
-      columns: [
-        { key: 'pollId', label: 'Poll' },
-        { key: 'question', label: 'Question' },
-        { key: 'overdueHours', label: 'Overdue Hours', format: 'decimal' },
-      ],
-      rows: aux.unresolvedPastDeadline || [],
-      key: 'aux_unresolved_polls',
-    },
   ];
 }
 
