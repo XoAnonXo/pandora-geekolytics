@@ -13,6 +13,8 @@ const INDEXER_URL =
   process.env.INDEXER_URL ||
   'https://pandoraindexer.up.railway.app/';
 const CHAIN_ID = 1;
+const MODELED_CREATION_FEE_USD = readConfiguredUsd('PANDORA_CREATION_FEE_USD', 5);
+const MODELED_REFRESH_FEE_USD = readConfiguredUsd('PANDORA_REFRESH_FEE_USD', 5);
 
 function send(res, status, headers, body) {
   res.writeHead(status, headers);
@@ -37,6 +39,11 @@ function toNum(value) {
   if (value === null || value === undefined) return 0;
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+function readConfiguredUsd(envName, fallback) {
+  const n = Number(process.env[envName]);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
 function usdcFromRaw(value) {
@@ -185,6 +192,124 @@ function objectEntriesDesc(obj) {
   return Object.entries(obj).sort((a, b) => Number(b[1]) - Number(a[1]));
 }
 
+function resolvePollLifecycleEventEpoch(poll) {
+  const resolvedAt = toNum(poll && poll.resolvedAt);
+  if (resolvedAt > 0) return resolvedAt;
+  if (toNum(poll && poll.status) !== 0) {
+    const deadlineEpoch = toNum(poll && poll.deadlineEpoch);
+    if (deadlineEpoch > 0) return deadlineEpoch;
+  }
+  return 0;
+}
+
+function buildModeledLifecycleFeeLedger({
+  dailyRows,
+  polls,
+  creationFeePerPollEth,
+  creationFeePerPollUsd,
+  refreshFeePerPollEth,
+  refreshFeePerPollUsd,
+}) {
+  const creationFeeSeries = dailyRows.map((row) => ({
+    day: row.day,
+    pollsCreated: toNum(row.pollsCreated),
+    creationFeeEthEstimated: toNum(row.pollsCreated) * creationFeePerPollEth,
+    creationFeeUsdModeled: toNum(row.pollsCreated) * creationFeePerPollUsd,
+  }));
+
+  const refreshCountByDay = {};
+  for (const poll of polls) {
+    const lifecycleEventEpoch = resolvePollLifecycleEventEpoch(poll);
+    const day = epochToDay(lifecycleEventEpoch);
+    if (!day) continue;
+    refreshCountByDay[day] = (refreshCountByDay[day] || 0) + 1;
+  }
+
+  const refreshFeeSeries = Object.entries(refreshCountByDay)
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+    .map(([day, resolvedPolls]) => ({
+      day,
+      resolvedPolls,
+      refreshFeeEthEstimated: resolvedPolls * refreshFeePerPollEth,
+      refreshFeeUsdModeled: resolvedPolls * refreshFeePerPollUsd,
+    }));
+
+  return {
+    creationFeeSeries,
+    refreshFeeSeries,
+    totalCreationFeeUsd: creationFeeSeries.reduce((sum, row) => sum + row.creationFeeUsdModeled, 0),
+    totalRefreshFeeUsd: refreshFeeSeries.reduce((sum, row) => sum + row.refreshFeeUsdModeled, 0),
+  };
+}
+
+function mergeFeeBreakdownByDay({
+  tradingFeeDaily,
+  redemptionFeeDaily,
+  creationFeeSeries,
+  refreshFeeSeries,
+}) {
+  const byDay = {};
+
+  function ensureRow(day) {
+    if (!day) return null;
+    if (!byDay[day]) {
+      byDay[day] = {
+        day,
+        tradingFeeUsdc: 0,
+        redemptionFeeUsdc: 0,
+        creationFeeUsd: 0,
+        refreshFeeUsd: 0,
+        creationFeeEth: 0,
+        refreshFeeEth: 0,
+      };
+    }
+    return byDay[day];
+  }
+
+  for (const row of tradingFeeDaily) {
+    const target = ensureRow(row.day);
+    if (target) target.tradingFeeUsdc = toNum(row.value);
+  }
+
+  for (const row of redemptionFeeDaily) {
+    const target = ensureRow(row.day);
+    if (target) target.redemptionFeeUsdc = toNum(row.value);
+  }
+
+  for (const row of creationFeeSeries) {
+    const target = ensureRow(row.day);
+    if (!target) continue;
+    target.creationFeeUsd = toNum(row.creationFeeUsdModeled);
+    target.creationFeeEth = toNum(row.creationFeeEthEstimated);
+  }
+
+  for (const row of refreshFeeSeries) {
+    const target = ensureRow(row.day);
+    if (!target) continue;
+    target.refreshFeeUsd = toNum(row.refreshFeeUsdModeled);
+    target.refreshFeeEth = toNum(row.refreshFeeEthEstimated);
+  }
+
+  const feeDailyMerged = Object.values(byDay)
+    .sort((a, b) => String(a.day).localeCompare(String(b.day)))
+    .map((row) => ({
+      ...row,
+      fixedLifecycleFeeUsd: row.creationFeeUsd + row.refreshFeeUsd,
+      totalFeeUsd: row.tradingFeeUsdc + row.redemptionFeeUsdc + row.creationFeeUsd + row.refreshFeeUsd,
+    }));
+
+  let cumulativeFeeUsd = 0;
+  const cumulativeFees = feeDailyMerged.map((row) => {
+    cumulativeFeeUsd += row.totalFeeUsd;
+    return { day: row.day, cumulativeFeeUsd };
+  });
+
+  return {
+    feeDailyMerged,
+    cumulativeFees,
+  };
+}
+
 function formatAddress(value) {
   const v = String(value || '');
   if (v.length < 12) return v;
@@ -327,7 +452,7 @@ async function buildAnalyticsPayload(registry) {
     fetchAllList({
       queryName: 'pollss',
       filterType: 'pollsFilter',
-      fields: ['id', 'chainId', 'creator', 'question', 'status', 'category', 'deadlineEpoch', 'createdAt'],
+      fields: ['id', 'chainId', 'creator', 'question', 'status', 'category', 'deadlineEpoch', 'createdAt', 'resolvedAt'],
       where: { chainId: CHAIN_ID },
       orderBy: 'createdAt',
       limit: 250,
@@ -642,6 +767,18 @@ async function buildAnalyticsPayload(registry) {
     totalUsdc,
   }));
 
+  const unresolvedPastDeadline = polls
+    .filter((p) => toNum(p.status) === 0 && toNum(p.deadlineEpoch) > 0 && toNum(p.deadlineEpoch) < nowSec)
+    .slice(0, 50)
+    .map((p) => ({
+      pollId: p.id,
+      creator: p.creator,
+      question: p.question,
+      deadline: epochToIso(p.deadlineEpoch),
+      overdueHours: Math.max(0, (nowSec - toNum(p.deadlineEpoch)) / 3600),
+    }))
+    .sort((a, b) => b.overdueHours - a.overdueHours);
+
   const nearCloseMarkets = activeMarkets
     .map((m) => ({
       marketAddress: m.id,
@@ -680,11 +817,23 @@ async function buildAnalyticsPayload(registry) {
       .sort((a, b) => toNum(b.timestamp) - toNum(a.timestamp))[0]?.newFee || 0;
 
   const creationFeePerPollEth = ethFromWei(currentProtocolFeeWei) + ethFromWei(currentOperatorFeeWei);
+  const refreshFeePerPollEth = creationFeePerPollEth;
+  const creationFeePerPollUsd = MODELED_CREATION_FEE_USD;
+  const refreshFeePerPollUsd = MODELED_REFRESH_FEE_USD;
 
-  const creationFeeSeries = dailyFromStats.map((d) => ({
-    day: d.day,
-    creationFeeEthEstimated: d.pollsCreated * creationFeePerPollEth,
-  }));
+  const {
+    creationFeeSeries,
+    refreshFeeSeries,
+    totalCreationFeeUsd,
+    totalRefreshFeeUsd,
+  } = buildModeledLifecycleFeeLedger({
+    dailyRows: dailyFromStats,
+    polls,
+    creationFeePerPollEth,
+    creationFeePerPollUsd,
+    refreshFeePerPollEth,
+    refreshFeePerPollUsd,
+  });
 
   const feeByDayMap = groupByDay(trades, 'timestamp');
   const feeDaily = toSeries(feeByDayMap, (rows) => rows.reduce((sum, r) => sum + usdcFromRaw(r.feeAmount), 0));
@@ -693,28 +842,11 @@ async function buildAnalyticsPayload(registry) {
     rows.reduce((sum, r) => sum + usdcFromRaw(r.feeAmount), 0),
   );
 
-  const feeDailyMergedMap = {};
-  for (const d of feeDaily) {
-    feeDailyMergedMap[d.day] = { day: d.day, tradingFeeUsdc: d.value, redemptionFeeUsdc: 0 };
-  }
-  for (const d of winningsFeeDaily) {
-    if (!feeDailyMergedMap[d.day]) {
-      feeDailyMergedMap[d.day] = { day: d.day, tradingFeeUsdc: 0, redemptionFeeUsdc: 0 };
-    }
-    feeDailyMergedMap[d.day].redemptionFeeUsdc = d.value;
-  }
-
-  const feeDailyMerged = Object.values(feeDailyMergedMap)
-    .sort((a, b) => String(a.day).localeCompare(String(b.day)))
-    .map((row) => ({
-      ...row,
-      totalFeeUsdc: row.tradingFeeUsdc + row.redemptionFeeUsdc,
-    }));
-
-  let cumulativeFeeUsdc = 0;
-  const cumulativeFees = feeDailyMerged.map((row) => {
-    cumulativeFeeUsdc += row.totalFeeUsdc;
-    return { day: row.day, cumulativeFeeUsdc };
+  const { feeDailyMerged, cumulativeFees } = mergeFeeBreakdownByDay({
+    tradingFeeDaily: feeDaily,
+    redemptionFeeDaily: winningsFeeDaily,
+    creationFeeSeries,
+    refreshFeeSeries,
   });
 
   const topTraderAgg = {};
@@ -737,6 +869,7 @@ async function buildAnalyticsPayload(registry) {
   })();
 
   const marketByAddress = new Map(markets.map((m) => [String(m.id || '').toLowerCase(), m]));
+  const pollById = new Map(polls.map((p) => [String(p.id || '').toLowerCase(), p]));
   const pollMarketCount = {};
   const pollToMarketAddress = {};
   for (const m of markets) {
@@ -962,7 +1095,14 @@ async function buildAnalyticsPayload(registry) {
     .map((m) => {
       const mk = String(m.id || '').toLowerCase();
       const pollKey = String(m.pollAddress || '').toLowerCase();
-      const creationFeeEstEth = creationFeePerPollEth / Math.max(1, pollMarketCount[pollKey] || 1);
+      const poll = pollById.get(pollKey) || null;
+      const perPollMarketCount = Math.max(1, pollMarketCount[pollKey] || 1);
+      const lifecycleEventEpoch = resolvePollLifecycleEventEpoch(poll);
+      const refreshApplied = lifecycleEventEpoch > 0;
+      const creationFeeEth = creationFeePerPollEth / perPollMarketCount;
+      const refreshFeeEth = refreshApplied ? refreshFeePerPollEth / perPollMarketCount : 0;
+      const creationFeeUsd = creationFeePerPollUsd / perPollMarketCount;
+      const refreshFeeUsd = refreshApplied ? refreshFeePerPollUsd / perPollMarketCount : 0;
       const tradingFeesUsdc = tradingFeeByMarket[mk] || 0;
       const redemptionFeesUsdc = redemptionFeeByMarket[mk] || 0;
       return {
@@ -972,14 +1112,19 @@ async function buildAnalyticsPayload(registry) {
         volumeUsdc: usdcFromRaw(m.totalVolume),
         tradingFeesUsdc,
         redemptionFeesUsdc,
-        creationFeeEstEth,
-        totalProtocolTakeUsdc: tradingFeesUsdc + redemptionFeesUsdc,
+        creationFeeEth,
+        refreshFeeEth,
+        creationFeeUsd,
+        refreshFeeUsd,
+        totalProtocolTakeUsd: tradingFeesUsdc + redemptionFeesUsdc + creationFeeUsd + refreshFeeUsd,
       };
     })
-    .sort((a, b) => b.totalProtocolTakeUsdc - a.totalProtocolTakeUsdc)
+    .sort((a, b) => b.totalProtocolTakeUsd - a.totalProtocolTakeUsd)
     .slice(0, 40);
 
   const totalTradingFeesUsdc = trades.reduce((sum, t) => sum + usdcFromRaw(t.feeAmount), 0);
+  const totalRedemptionFeesUsdc = winnings.reduce((sum, w) => sum + usdcFromRaw(w.feeAmount), 0);
+  const totalFeesGeneratedUsd = totalTradingFeesUsdc + totalRedemptionFeesUsdc + totalCreationFeeUsd + totalRefreshFeeUsd;
   const positiveNetLiquidityTotal = Object.values(lpAgg).reduce((sum, lp) => sum + Math.max(lp.netUsdc, 0), 0);
   const lpRoiPerformance = Object.values(lpAgg)
     .map((lp) => {
@@ -1065,11 +1210,34 @@ async function buildAnalyticsPayload(registry) {
     .sort((a, b) => b.marketsCreated - a.marketsCreated || b.avgVolumeUsdc - a.avgVolumeUsdc)
     .slice(0, 40);
 
+  const pollCreationFeeTable = polls
+    .map((p) => {
+      const pollKey = String(p.id || '').toLowerCase();
+      const lifecycleEventEpoch = resolvePollLifecycleEventEpoch(p);
+      const refreshApplied = lifecycleEventEpoch > 0;
+      return {
+        pollId: pollKey,
+        pollShort: formatAddress(pollKey),
+        creator: String(p.creator || '').toLowerCase(),
+        creatorShort: formatAddress(String(p.creator || '').toLowerCase()),
+        question: p.question || '',
+        createdAt: epochToIso(p.createdAt),
+        resolvedAt: refreshApplied ? epochToIso(lifecycleEventEpoch) : null,
+        status: refreshApplied ? 'resolved_or_closed' : 'unresolved',
+        creationFeeUsd: creationFeePerPollUsd,
+        refreshFeeUsd: refreshApplied ? refreshFeePerPollUsd : 0,
+        totalLifecycleFeeUsd: creationFeePerPollUsd + (refreshApplied ? refreshFeePerPollUsd : 0),
+      };
+    })
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+    .slice(0, 100);
+
   const resolutionSlaOverdue = polls
     .map((p) => {
       const pollKey = String(p.id || '').toLowerCase();
       const deadline = toNum(p.deadlineEpoch);
       const status = toNum(p.status);
+      const lifecycleEventEpoch = resolvePollLifecycleEventEpoch(p);
       const overdueHours = deadline > 0 && nowSec > deadline && status === 0 ? (nowSec - deadline) / 3600 : 0;
       return {
         pollId: pollKey,
@@ -1077,7 +1245,7 @@ async function buildAnalyticsPayload(registry) {
         marketAddress: pollToMarketAddress[pollKey] || '',
         marketShort: formatAddress(pollToMarketAddress[pollKey] || ''),
         deadline: epochToIso(p.deadlineEpoch),
-        resolvedAt: status === 0 ? null : epochToIso(p.deadlineEpoch),
+        resolvedAt: status === 0 ? null : epochToIso(lifecycleEventEpoch),
         status: status === 0 ? 'unresolved' : 'resolved_or_closed',
         hoursOverdue: overdueHours,
       };
@@ -1204,11 +1372,20 @@ async function buildAnalyticsPayload(registry) {
     if (!wallet) continue;
     feeByWallet[wallet] = (feeByWallet[wallet] || 0) + usdcFromRaw(w.feeAmount);
   }
+  for (const p of polls) {
+    const creator = String(p.creator || '').toLowerCase();
+    if (!creator) continue;
+    feeByWallet[creator] = (feeByWallet[creator] || 0) + creationFeePerPollUsd;
+    if (resolvePollLifecycleEventEpoch(p) > 0) {
+      feeByWallet[creator] += refreshFeePerPollUsd;
+    }
+  }
+  const feeByMarketTotal = Object.fromEntries(marketProfitability.map((row) => [row.marketAddress, row.totalProtocolTakeUsd]));
   const totalFeesForConcentration =
-    Object.values(feeByWallet).reduce((a, b) => a + b, 0) + Object.values(tradingFeeByMarket).reduce((a, b) => a + b, 0);
+    Object.values(feeByWallet).reduce((a, b) => a + b, 0) + Object.values(feeByMarketTotal).reduce((a, b) => a + b, 0);
   const feeConcentration = [];
   let cumulativeMarketShare = 0;
-  objectEntriesDesc(tradingFeeByMarket)
+  objectEntriesDesc(feeByMarketTotal)
     .slice(0, 15)
     .forEach(([marketAddress, feeUsdc], idx) => {
       const share = safeDivide(feeUsdc, totalFeesForConcentration);
@@ -1297,11 +1474,11 @@ async function buildAnalyticsPayload(registry) {
     },
     {
       key: 'total_fees_generated',
-      title: 'Total Fees Generated (USDC)',
+      title: 'Total Fees Generated (USD)',
       type: 'kpi',
-      value: usdcFromRaw(platform.totalFees),
+      value: totalFeesGeneratedUsd,
       format: 'currency',
-      subtitle: 'Indexer cumulative fee metric',
+      subtitle: 'Trading + redemption + modeled creation/refresh fees',
     },
     {
       key: 'total_redemptions',
@@ -1358,6 +1535,27 @@ async function buildAnalyticsPayload(registry) {
         { key: 'totalVolumeUsdc', label: 'Volume USDC', format: 'currency' },
       ],
       rows: creatorsLeaderboard,
+    },
+    {
+      key: 'poll_creation_fee_table',
+      title: 'Poll Creation Fee Table',
+      type: 'table',
+      columns: [
+        { key: 'pollShort', label: 'Poll' },
+        { key: 'creatorShort', label: 'Creator' },
+        { key: 'question', label: 'Question' },
+        { key: 'createdAt', label: 'Created At' },
+        { key: 'resolvedAt', label: 'Resolved At' },
+        { key: 'status', label: 'Status' },
+        { key: 'creationFeeUsd', label: 'Creation Fee', format: 'currency' },
+        { key: 'refreshFeeUsd', label: 'Refresh Fee', format: 'currency' },
+        { key: 'totalLifecycleFeeUsd', label: 'Total Fee', format: 'currency' },
+      ],
+      rows: pollCreationFeeTable,
+      notes: [
+        `Creation fee is modeled at ${creationFeePerPollUsd.toFixed(2)} USD per poll.`,
+        `Refresh fee is modeled at ${refreshFeePerPollUsd.toFixed(2)} USD once a poll resolves/closes.`,
+      ],
     },
     {
       key: 'daily_trading_volume',
@@ -1510,45 +1708,60 @@ async function buildAnalyticsPayload(registry) {
     },
     {
       key: 'daily_fees_usd_including_creation_eth',
-      title: 'Daily Fees Generated (Indexer)',
+      title: 'Daily Fees Generated (USD)',
       type: 'multiseries',
       series: [
         {
-          name: 'Trading Fees USDC',
+          name: 'Trading Fees',
           points: feeDailyMerged.map((d) => ({ x: d.day, y: d.tradingFeeUsdc })),
           yFormat: 'currency',
         },
         {
-          name: 'Redemption Fees USDC',
+          name: 'Redemption Fees',
           points: feeDailyMerged.map((d) => ({ x: d.day, y: d.redemptionFeeUsdc })),
           yFormat: 'currency',
         },
         {
-          name: 'Creation Fee Est. ETH',
-          points: creationFeeSeries.map((d) => ({ x: d.day, y: d.creationFeeEthEstimated })),
-          yFormat: 'decimal',
+          name: 'Creation Fees (Modeled)',
+          points: feeDailyMerged.map((d) => ({ x: d.day, y: d.creationFeeUsd })),
+          yFormat: 'currency',
+        },
+        {
+          name: 'Refresh Fees (Modeled)',
+          points: feeDailyMerged.map((d) => ({ x: d.day, y: d.refreshFeeUsd })),
+          yFormat: 'currency',
         },
       ],
       notes: [
-        'Creation fee is estimated from current oracle fee settings (protocol + operator) times polls created.',
-        'No Dune/chain trace enrichment is used in this page.',
+        `Creation fee is modeled at ${creationFeePerPollUsd.toFixed(2)} USD per poll created.`,
+        `Refresh fee is modeled at ${refreshFeePerPollUsd.toFixed(2)} USD per poll resolved/closed.`,
+        `Current raw on-chain creation fee setting is ${creationFeePerPollEth.toFixed(6)} ETH (protocol + operator).`,
       ],
     },
     {
       key: 'cumulative_fees_usd_including_creation_eth',
-      title: 'Cumulative Fees Generated (USDC)',
+      title: 'Cumulative Fees Generated (USD)',
       type: 'timeseries',
-      series: cumulativeFees.map((d) => ({ x: d.day, y: d.cumulativeFeeUsdc })),
+      series: cumulativeFees.map((d) => ({ x: d.day, y: d.cumulativeFeeUsd })),
       yFormat: 'currency',
+      notes: [
+        'Cumulative totals include trading fees, redemption fees, modeled creation fees, and modeled refresh fees.',
+      ],
     },
     {
       key: 'market_creation_fee_eth_gross_vs_net',
-      title: 'Market Creation Fee ETH Estimate (Gross)',
-      type: 'timeseries',
-      series: creationFeeSeries.map((d) => ({ x: d.day, y: d.creationFeeEthEstimated })),
-      yFormat: 'decimal',
+      title: 'Poll Lifecycle Fee Model',
+      type: 'kpi_group',
+      items: [
+        { label: 'Creation Fee USD', value: creationFeePerPollUsd, format: 'currency' },
+        { label: 'Refresh Fee USD', value: refreshFeePerPollUsd, format: 'currency' },
+        { label: 'Creation Fee ETH', value: creationFeePerPollEth, format: 'decimal' },
+        { label: 'Refresh Fee ETH', value: refreshFeePerPollEth, format: 'decimal' },
+        { label: 'Lifecycle Fee USD', value: creationFeePerPollUsd + refreshFeePerPollUsd, format: 'currency' },
+      ],
       notes: [
-        `Current per-poll fee estimate: ${creationFeePerPollEth.toFixed(6)} ETH (protocol + operator).`,
+        'ETH values are current raw oracle settings.',
+        'Refresh ETH is assumed to match creation ETH because the indexer does not expose a separate refresh-fee setting.',
       ],
     },
     {
@@ -1630,10 +1843,15 @@ async function buildAnalyticsPayload(registry) {
         { key: 'volumeUsdc', label: 'Volume', format: 'currency' },
         { key: 'tradingFeesUsdc', label: 'Trading Fees', format: 'currency' },
         { key: 'redemptionFeesUsdc', label: 'Redemption Fees', format: 'currency' },
-        { key: 'creationFeeEstEth', label: 'Creation Fee ETH', format: 'decimal' },
-        { key: 'totalProtocolTakeUsdc', label: 'Protocol Take', format: 'currency' },
+        { key: 'creationFeeUsd', label: 'Creation Fee', format: 'currency' },
+        { key: 'refreshFeeUsd', label: 'Refresh Fee', format: 'currency' },
+        { key: 'totalProtocolTakeUsd', label: 'Protocol Take', format: 'currency' },
       ],
       rows: marketProfitability,
+      notes: [
+        'Creation fee is allocated across markets that share the same poll.',
+        'Refresh fee is allocated the same way once a poll resolves/closes.',
+      ],
     },
     {
       key: 'lp_roi_performance_table',
@@ -1775,9 +1993,11 @@ async function buildAnalyticsPayload(registry) {
     indexerUrl: INDEXER_URL,
     chainId: CHAIN_ID,
     assumptions: [
-      'All USDC amounts normalized with 6 decimals.',
+      'Indexed trading/redemption fees are normalized from 6-decimal USDC amounts.',
       'YES price in priceTicks/candles normalized with 1e9 scale.',
-      'Creation fee ETH series is estimated from latest oracle fee settings and polls created by day.',
+      `Creation fee is modeled at ${creationFeePerPollUsd.toFixed(2)} USD per poll created.`,
+      `Refresh fee is modeled at ${refreshFeePerPollUsd.toFixed(2)} USD per poll resolved/closed.`,
+      `Current raw on-chain creation fee setting is ${creationFeePerPollEth.toFixed(6)} ETH; refresh ETH is assumed to match.`,
       'Some advanced tables use explicit proxy fields where indexer lacks direct resolution timestamps.',
       'No Dune embeds or Dune APIs are used by this page.',
     ],
@@ -1806,6 +2026,7 @@ async function buildAnalyticsPayload(registry) {
       topTraders,
       disputesByDay: disputesByDay.map((d) => ({ day: d.day, count: d.value })),
       redemptionByMarketType,
+      unresolvedPastDeadline: unresolvedPastDeadline.slice(0, 20),
     },
   };
 }
@@ -1874,9 +2095,17 @@ const server = http.createServer(async (req, res) => {
   }, body);
 });
 
-server.listen(PORT, HOST, () => {
-  // eslint-disable-next-line no-console
-  console.log(`Pandora mega analytics running at http://localhost:${PORT}`);
-  // eslint-disable-next-line no-console
-  console.log(`Indexer source: ${INDEXER_URL}`);
-});
+if (require.main === module) {
+  server.listen(PORT, HOST, () => {
+    // eslint-disable-next-line no-console
+    console.log(`Pandora mega analytics running at http://localhost:${PORT}`);
+    // eslint-disable-next-line no-console
+    console.log(`Indexer source: ${INDEXER_URL}`);
+  });
+}
+
+module.exports = {
+  buildModeledLifecycleFeeLedger,
+  mergeFeeBreakdownByDay,
+  resolvePollLifecycleEventEpoch,
+};

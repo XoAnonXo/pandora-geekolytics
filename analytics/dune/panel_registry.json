@@ -89,6 +89,14 @@
   },
   {
     "order": 12,
+    "key": "poll_creation_fee_table",
+    "section": "Market Creation",
+    "title": "Poll Creation Fee Table",
+    "visualizationId": null,
+    "queryId": null
+  },
+  {
+    "order": 13,
     "key": "daily_trading_volume",
     "section": "Trading",
     "title": "Daily Trading Volume",
@@ -96,7 +104,7 @@
     "queryId": null
   },
   {
-    "order": 13,
+    "order": 14,
     "key": "trade_count_and_unique_traders",
     "section": "Trading",
     "title": "Trade Count and Unique Traders",
@@ -104,7 +112,7 @@
     "queryId": null
   },
   {
-    "order": 14,
+    "order": 15,
     "key": "buy_vs_sell_split",
     "section": "Trading",
     "title": "Buy vs Sell Split",
@@ -112,7 +120,7 @@
     "queryId": null
   },
   {
-    "order": 15,
+    "order": 16,
     "key": "avg_median_trade_size",
     "section": "Trading",
     "title": "Average and Median Trade Size",
@@ -120,7 +128,7 @@
     "queryId": null
   },
   {
-    "order": 16,
+    "order": 17,
     "key": "top_markets_by_volume",
     "section": "Trading",
     "title": "Top Markets by Volume",
@@ -128,7 +136,7 @@
     "queryId": null
   },
   {
-    "order": 17,
+    "order": 18,
     "key": "added_removed_net_liquidity",
     "section": "Liquidity",
     "title": "Added vs Removed vs Net Liquidity",
@@ -136,7 +144,7 @@
     "queryId": null
   },
   {
-    "order": 18,
+    "order": 19,
     "key": "top_lp_wallets",
     "section": "Liquidity",
     "title": "Top LP Wallets",
@@ -144,7 +152,7 @@
     "queryId": null
   },
   {
-    "order": 19,
+    "order": 20,
     "key": "yes_probability_trend",
     "section": "Pricing",
     "title": "YES Probability Trend",
@@ -152,7 +160,7 @@
     "queryId": null
   },
   {
-    "order": 20,
+    "order": 21,
     "key": "volatility_proxy",
     "section": "Pricing",
     "title": "Volatility Proxy",
@@ -160,7 +168,7 @@
     "queryId": null
   },
   {
-    "order": 21,
+    "order": 22,
     "key": "outcome_distribution",
     "section": "Resolution",
     "title": "Outcome Distribution",
@@ -168,7 +176,7 @@
     "queryId": null
   },
   {
-    "order": 22,
+    "order": 23,
     "key": "time_to_resolution",
     "section": "Resolution",
     "title": "Time to Resolution",
@@ -176,7 +184,7 @@
     "queryId": null
   },
   {
-    "order": 23,
+    "order": 24,
     "key": "redemption_amounts_over_time",
     "section": "Redemptions and PnL",
     "title": "Redemption Amounts Over Time",
@@ -184,7 +192,7 @@
     "queryId": null
   },
   {
-    "order": 24,
+    "order": 25,
     "key": "low_liquidity_and_near_close_markets",
     "section": "Health and Risk",
     "title": "Low-Liquidity and Near-Close Markets",
@@ -192,31 +200,31 @@
     "queryId": null
   },
   {
-    "order": 25,
+    "order": 26,
     "key": "daily_fees_usd_including_creation_eth",
     "section": "Fees Audit",
-    "title": "Daily Fees USD (Includes Market Creation ETH)",
+    "title": "Daily Fees Generated (USD)",
     "visualizationId": 10636801,
     "queryId": 6767854
   },
   {
-    "order": 26,
+    "order": 27,
     "key": "cumulative_fees_usd_including_creation_eth",
     "section": "Fees Audit",
-    "title": "Cumulative Fees USD (Includes Market Creation ETH)",
+    "title": "Cumulative Fees Generated (USD)",
     "visualizationId": 10636802,
     "queryId": 6767854
   },
   {
-    "order": 27,
+    "order": 28,
     "key": "market_creation_fee_eth_gross_vs_net",
     "section": "Fees Audit",
-    "title": "Market Creation Fee ETH (Gross vs Net)",
+    "title": "Poll Lifecycle Fee Model",
     "visualizationId": 10636804,
     "queryId": 6767854
   },
   {
-    "order": 28,
+    "order": 29,
     "key": "wallet_pnl_leaderboard",
     "section": "Advanced Trader Analytics",
     "title": "Wallet PnL Leaderboard (Proxy)",
@@ -224,7 +232,7 @@
     "queryId": null
   },
   {
-    "order": 29,
+    "order": 30,
     "key": "trader_win_rate_table",
     "section": "Advanced Trader Analytics",
     "title": "Trader Win-Rate Table (Proxy)",
@@ -232,7 +240,7 @@
     "queryId": null
   },
   {
-    "order": 30,
+    "order": 31,
     "key": "new_vs_returning_traders_daily",
     "section": "Advanced Trader Analytics",
     "title": "New vs Returning Traders (Daily)",
@@ -240,7 +248,7 @@
     "queryId": null
   },
   {
-    "order": 31,
+    "order": 32,
     "key": "trader_retention_cohorts",
     "section": "Advanced Trader Analytics",
     "title": "Trader Retention Cohorts (D1/D7/D30)",
@@ -248,7 +256,7 @@
     "queryId": null
   },
   {
-    "order": 32,
+    "order": 33,
     "key": "whale_activity_table",
     "section": "Advanced Trader Analytics",
     "title": "Whale Activity Table",
@@ -256,7 +264,7 @@
     "queryId": null
   },
   {
-    "order": 33,
+    "order": 34,
     "key": "market_profitability_table",
     "section": "Market Economics",
     "title": "Market Profitability Table",
@@ -264,7 +272,7 @@
     "queryId": null
   },
   {
-    "order": 34,
+    "order": 35,
     "key": "lp_roi_performance_table",
     "section": "Market Economics",
     "title": "LP ROI / Performance Table (Proxy)",
@@ -272,7 +280,7 @@
     "queryId": null
   },
   {
-    "order": 35,
+    "order": 36,
     "key": "liquidity_utilization_by_market",
     "section": "Market Economics",
     "title": "Liquidity Utilization by Market",
@@ -280,7 +288,7 @@
     "queryId": null
   },
   {
-    "order": 36,
+    "order": 37,
     "key": "creator_quality_table",
     "section": "Market Economics",
     "title": "Creator Quality Table (Proxy)",
@@ -288,7 +296,7 @@
     "queryId": null
   },
   {
-    "order": 37,
+    "order": 38,
     "key": "resolution_sla_overdue_table",
     "section": "Resolution Ops",
     "title": "Resolution SLA / Overdue Table",
@@ -296,7 +304,7 @@
     "queryId": null
   },
   {
-    "order": 38,
+    "order": 39,
     "key": "pre_close_rush_table",
     "section": "Flow and Risk",
     "title": "Pre-Close Rush Table (Last 24h)",
@@ -304,7 +312,7 @@
     "queryId": null
   },
   {
-    "order": 39,
+    "order": 40,
     "key": "price_shock_risk_alerts",
     "section": "Flow and Risk",
     "title": "Price Shock / Risk Alerts",
@@ -312,7 +320,7 @@
     "queryId": null
   },
   {
-    "order": 40,
+    "order": 41,
     "key": "yes_no_flow_imbalance",
     "section": "Flow and Risk",
     "title": "YES vs NO Flow Imbalance",
@@ -320,7 +328,7 @@
     "queryId": null
   },
   {
-    "order": 41,
+    "order": 42,
     "key": "fee_concentration_table",
     "section": "Flow and Risk",
     "title": "Fee Concentration (Markets & Wallets)",
@@ -328,7 +336,7 @@
     "queryId": null
   },
   {
-    "order": 42,
+    "order": 43,
     "key": "redemption_efficiency_table",
     "section": "Resolution Ops",
     "title": "Redemption Efficiency Table (Proxy)",
